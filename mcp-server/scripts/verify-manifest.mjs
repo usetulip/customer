@@ -73,7 +73,9 @@ async function verify(name, config) {
   await client.connect(transport);
   try {
     const { resources } = await client.listResources();
-    const clientIds = resources.map((r) => r.uri.replace("tulip://tokens/", ""));
+    const clientIds = resources
+      .filter((r) => r.uri.startsWith("tulip://tokens/"))
+      .map((r) => r.uri.replace("tulip://tokens/", ""));
     if (!clientIds.length) throw new Error("no client tokens visible to this connection");
 
     const clientId = values.client ?? clientIds[0];

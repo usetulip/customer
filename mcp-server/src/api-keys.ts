@@ -48,7 +48,7 @@ export type SupabaseVerifierOptions = {
   fetch?: typeof fetch;
 };
 
-function serviceRoleHeaders(serviceRoleKey: string): Record<string, string> {
+export function serviceRoleHeaders(serviceRoleKey: string): Record<string, string> {
   return {
     apikey: serviceRoleKey,
     // Legacy service_role keys are JWTs; new `sb_secret_` keys go in `apikey` only.

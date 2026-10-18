@@ -4,6 +4,7 @@ import { bodyLimit } from "hono/body-limit";
 import { createMiddleware } from "hono/factory";
 import { API_KEY_HEADER, type ApiKeyVerifier, type VerifiedApiKey } from "./api-keys.ts";
 import { createTulipServer } from "./server.ts";
+import type { TulipStore } from "./tokens.ts";
 
 // Streamable HTTP in stateless mode: every POST gets a fresh McpServer scoped
 // to the caller's API key, so instances can scale horizontally and need no
@@ -19,7 +20,13 @@ function jsonRpcError(code: number, message: string) {
 
 type Env = { Variables: { apiKey: VerifiedApiKey } };
 
-export function createHttpApp({ verifyApiKey }: { verifyApiKey: ApiKeyVerifier }) {
+export function createHttpApp({
+  verifyApiKey,
+  store,
+}: {
+  verifyApiKey: ApiKeyVerifier;
+  store: TulipStore;
+}) {
   const app = new Hono<Env>();
 
   // Runs before the MCP server exists, so no tool or resource is resolved
@@ -64,7 +71,7 @@ export function createHttpApp({ verifyApiKey }: { verifyApiKey: ApiKeyVerifier }
         return c.json(jsonRpcError(-32000, "Method not allowed; this server is stateless, use POST"), 405);
       }
 
-      const server = createTulipServer(c.get("apiKey").clientIds);
+      const server = createTulipServer(c.get("apiKey").clientIds, store);
       const transport = new WebStandardStreamableHTTPServerTransport({
         sessionIdGenerator: undefined,
       });

@@ -99,7 +99,7 @@ Never paste the key into `.cursor/mcp.json`: that file is committed.
    npm run verify -- --server tulip-http-local
    ```
 
-   This should show the same three ✓ lines as Option A. The key only sees its own clients, so `clients visible` lists exactly the `--client` values you minted it with.
+   This should show the same three ✓ lines as Option A, once an operator has published tokens for the client in the Operator Taste Dashboard. The HTTP server reads tulip-db, not `mcp-server/tokens/`, so a client with nothing published fails with `No token definition found`. The key only sees its own clients, so `clients visible` lists exactly the `--client` values you minted it with.
 
 ## 4. Try it in Cursor chat
 
@@ -112,9 +112,13 @@ Supported `component_type` values are `data-table`, `stats-grid`, `form-wizard`,
 
 ## Adding a design partner's tokens
 
-1. Save their tokens as `mcp-server/tokens/<client-id>.json`. The client id is a lowercase slug, such as `acme-corp`, and the file must match `ThemeTokensSchema` in `lib/token-schema.ts`. `tokens/demo.json` is a complete example.
-2. Check the file: `npm run verify -- --server tulip --client <client-id>`. Validation errors list the exact field paths.
-3. For HTTP access, mint a key with `--client <client-id>`.
+The HTTP server only serves what operators have published. It reads `public.client_token_sets` and `public.component_blocks` in tulip-db (see the [README](README.md#where-tokens-and-blocks-come-from)).
+
+1. In the Operator Taste Dashboard, register a component block for the client, using a lowercase slug client id such as `acme-corp`. Its tokens must match `ThemeTokensSchema` in `lib/token-schema.ts`; `tokens/demo.json` is a complete example.
+2. Review the block and publish it. That writes the client's tokens and the approved block.
+3. For HTTP access, mint a key with `--client <client-id>`, then check it: `npm run verify -- --server tulip-http-local --client <client-id>`.
+
+The local stdio server (`tulip`) reads `mcp-server/tokens/<client-id>.json` instead when `SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY` aren't set. Use that to try a token file before an operator publishes it: `npm run verify -- --server tulip --client <client-id>`.
 
 ## Troubleshooting
 
@@ -126,6 +130,7 @@ Supported `component_type` values are `data-table`, `stats-grid`, `form-wizard`,
 | `Invalid, expired or revoked API key` | Mint a new key (step 3.2), then re-export it and relaunch Cursor |
 | Works in `verify` but not in Cursor | Cursor can't see the variable: relaunch it from the terminal where it's exported (step 3.3) |
 | `This API key is not authorized for client "…"` | The key wasn't minted for that client; mint one with `--client <id>` |
+| `No token definition found for client "…"` over HTTP | Nothing is published for that client yet; publish a block for it in the Operator Taste Dashboard |
 | `API key verification is temporarily unavailable` (503) | The server can't reach Supabase; check `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` in `.env` |
 | Port 3333 already in use | Change `PORT` in `.env` and the `url` in `.cursor/mcp.json` to the same value |
 

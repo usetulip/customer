@@ -1,5 +1,6 @@
-// End-to-end check over real stdio: spawns dist/index.js and exercises the
-// resource template and compile_component. Generated files are written to
+// End-to-end check over real stdio: spawns dist/index.js in local-files mode
+// (no Supabase credentials) and exercises the resource templates and
+// compile_component. smoke-http.mjs covers the Supabase-backed store. Generated files are written to
 // SMOKE_OUT_DIR when set, so they can be type-checked inside the Next app.
 import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -15,11 +16,14 @@ function check(name, ok, detail = "") {
 
 async function connect(env = {}) {
   const client = new Client({ name: "tulip-smoke", version: "0.0.0" });
+  const baseEnv = { ...process.env };
+  delete baseEnv.SUPABASE_URL;
+  delete baseEnv.SUPABASE_SERVICE_ROLE_KEY;
   await client.connect(
     new StdioClientTransport({
       command: process.execPath,
       args: ["dist/index.js"],
-      env: { ...process.env, ...env },
+      env: { ...baseEnv, ...env },
       stderr: "ignore",
     }),
   );
@@ -40,6 +44,10 @@ check("input schema is strict", tool?.inputSchema.additionalProperties === false
 
 const { resourceTemplates } = await client.listResourceTemplates();
 check("resource template is listed", resourceTemplates.some((t) => t.uriTemplate === "tulip://tokens/{client_id}"));
+check("blocks template is listed", resourceTemplates.some((t) => t.uriTemplate === "tulip://blocks/{client_id}"));
+
+const localBlocks = JSON.parse((await client.readResource({ uri: "tulip://blocks/demo" })).contents[0].text);
+check("local files mode publishes no blocks", localBlocks.client_id === "demo" && localBlocks.blocks.length === 0);
 
 const { resources } = await client.listResources();
 check("demo client is listed", resources.some((r) => r.uri === "tulip://tokens/demo"));

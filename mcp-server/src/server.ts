@@ -5,7 +5,7 @@ import {
   GovernanceError,
   compileComponent,
 } from "./compiler.ts";
-import { TokenLoadError, listClientIds, loadClientTokens } from "./tokens.ts";
+import { StoreUnavailableError, TokenLoadError, type TulipStore } from "./tokens.ts";
 
 /**
  * Which clients' tokens a connection may use. Local stdio is trusted with
@@ -25,19 +25,21 @@ function assertClientAccess(scope: ClientScope, clientId: string) {
   }
 }
 
-async function visibleClientIds(scope: ClientScope) {
-  const ids = await listClientIds();
-  return scope === "all" ? ids : ids.filter((id) => scope.has(id));
-}
+const firstValue = (value: string | string[]) => (Array.isArray(value) ? value[0] : value);
 
-export function createTulipServer(scope: ClientScope) {
-  const server = new McpServer({ name: "tulip", version: "0.2.0" });
+export function createTulipServer(scope: ClientScope, store: TulipStore) {
+  const server = new McpServer({ name: "tulip", version: "0.3.0" });
+
+  async function visibleClientIds() {
+    const ids = await store.listClientIds();
+    return scope === "all" ? ids : ids.filter((id) => scope.has(id));
+  }
 
   server.registerResource(
     "client-tokens",
     new ResourceTemplate("tulip://tokens/{client_id}", {
       list: async () => ({
-        resources: (await visibleClientIds(scope)).map((id) => ({
+        resources: (await visibleClientIds()).map((id) => ({
           uri: `tulip://tokens/${id}`,
           name: `${id} theme tokens`,
           mimeType: "application/json",
@@ -45,26 +47,65 @@ export function createTulipServer(scope: ClientScope) {
       }),
       complete: {
         client_id: async (value) =>
-          (await visibleClientIds(scope)).filter((id) => id.startsWith(value)),
+          (await visibleClientIds()).filter((id) => id.startsWith(value)),
       },
     }),
     {
       title: "Client theme tokens",
       description:
-        "Read-only theme tokens for a client, validated against lib/token-schema.ts (ThemeTokensSchema).",
+        "Read-only theme tokens for a client as published from the Tulip operator dashboard, " +
+        "validated against lib/token-schema.ts (ThemeTokensSchema).",
       mimeType: "application/json",
     },
     async (uri, { client_id }) => {
-      const clientId = Array.isArray(client_id) ? client_id[0] : client_id;
+      const clientId = firstValue(client_id);
       assertClientAccess(scope, clientId);
       // Errors propagate as JSON-RPC errors to the client.
-      const tokens = await loadClientTokens(clientId);
+      const tokens = await store.loadClientTokens(clientId);
       return {
         contents: [
           {
             uri: uri.href,
             mimeType: "application/json",
             text: JSON.stringify(tokens, null, 2),
+          },
+        ],
+      };
+    },
+  );
+
+  server.registerResource(
+    "client-blocks",
+    new ResourceTemplate("tulip://blocks/{client_id}", {
+      list: async () => ({
+        resources: (await visibleClientIds()).map((id) => ({
+          uri: `tulip://blocks/${id}`,
+          name: `${id} approved blocks`,
+          mimeType: "application/json",
+        })),
+      }),
+      complete: {
+        client_id: async (value) =>
+          (await visibleClientIds()).filter((id) => id.startsWith(value)),
+      },
+    }),
+    {
+      title: "Approved component blocks",
+      description:
+        "Component blocks an operator reviewed and published for a client: the live source, version and " +
+        "content hash of each. Unpublished edits are never included.",
+      mimeType: "application/json",
+    },
+    async (uri, { client_id }) => {
+      const clientId = firstValue(client_id);
+      assertClientAccess(scope, clientId);
+      const blocks = await store.listPublishedBlocks(clientId);
+      return {
+        contents: [
+          {
+            uri: uri.href,
+            mimeType: "application/json",
+            text: JSON.stringify({ client_id: clientId, blocks }, null, 2),
           },
         ],
       };
@@ -86,7 +127,7 @@ export function createTulipServer(scope: ClientScope) {
     async (input) => {
       try {
         assertClientAccess(scope, input.client_id);
-        const tokens = await loadClientTokens(input.client_id);
+        const tokens = await store.loadClientTokens(input.client_id);
         const result = compileComponent(input, tokens);
         return {
           content: [
@@ -101,6 +142,7 @@ export function createTulipServer(scope: ClientScope) {
         if (
           err instanceof ClientAccessError ||
           err instanceof TokenLoadError ||
+          err instanceof StoreUnavailableError ||
           err instanceof GovernanceError
         ) {
           return { isError: true, content: [{ type: "text", text: err.message }] };
