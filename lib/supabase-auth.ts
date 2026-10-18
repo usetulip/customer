@@ -170,3 +170,56 @@ export function clearSessionCookies(response: NextResponse) {
   response.cookies.set(ACCESS_COOKIE, "", { ...cookieOptions, maxAge: 0 });
   response.cookies.set(REFRESH_COOKIE, "", { ...cookieOptions, maxAge: 0 });
 }
+
+export type AuthenticatedRequest =
+  | { user: SupabaseUser; refreshedSession: SupabaseSession | null }
+  | { user: null; refreshedSession: null };
+
+// Resolve the signed-in user from the session cookies, rotating an expired
+// access token. Callers must pass `refreshedSession` to `setSessionCookies`.
+export async function getRequestUser(
+  request: NextRequest,
+): Promise<AuthenticatedRequest> {
+  const { accessToken, refreshToken } = readSessionCookies(request);
+
+  if (accessToken) {
+    const { ok, data } = await supabaseAuth("/user", { accessToken });
+    if (ok) {
+      return { user: data as unknown as SupabaseUser, refreshedSession: null };
+    }
+  }
+
+  if (refreshToken) {
+    const { ok, data } = await supabaseAuth("/token?grant_type=refresh_token", {
+      method: "POST",
+      body: { refresh_token: refreshToken },
+    });
+    if (ok && isSupabaseSession(data)) {
+      return { user: data.user, refreshedSession: data };
+    }
+  }
+
+  return { user: null, refreshedSession: null };
+}
+
+// Mirrors the backend's requireClientUser: signed-in, non-admin users only.
+export async function requireClientUser(request: NextRequest) {
+  const { user, refreshedSession } = await getRequestUser(request);
+
+  if (!user) {
+    const response = NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    clearSessionCookies(response);
+    return { error: response };
+  }
+
+  if (toAuthUser(user).role === "admin") {
+    return {
+      error: NextResponse.json(
+        { error: "Admin accounts cannot access the client portal" },
+        { status: 403 },
+      ),
+    };
+  }
+
+  return { user, refreshedSession };
+}
