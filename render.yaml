@@ -1,0 +1,28 @@
+# Render Blueprint for the remote Tulip MCP server (mcp-server/).
+# The Next.js customer app in this repo deploys on Vercel and is not part of this blueprint.
+services:
+  - type: web
+    name: tulip-mcp
+    runtime: node
+    plan: starter
+    region: oregon
+    branch: main
+    # Built from the repo root: the bundle includes ../lib/token-schema.ts.
+    buildCommand: cd mcp-server && npm ci && npm run build
+    startCommand: node mcp-server/dist/http.js
+    healthCheckPath: /healthz
+    buildFilter:
+      paths:
+        - mcp-server/**
+        - lib/token-schema.ts
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: SUPABASE_URL
+        value: https://pdwtxnngciqdjbylyntk.supabase.co
+      # Supabase service role key (tulip-db). Set it in the Render dashboard; never commit it.
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      # How long a verified API key is trusted before re-checking Supabase (= revocation delay).
+      - key: API_KEY_CACHE_TTL_MS
+        value: "60000"

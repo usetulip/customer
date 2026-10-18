@@ -1,0 +1,20 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "strict": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "isolatedModules": true,
+    "allowImportingTsExtensions": true,
+    "types": ["node"],
+    "lib": ["ES2022"],
+    // lib/token-schema.ts lives in the Next app; resolve its `zod` import to
+    // this package's copy so the server doesn't depend on the app's install.
+    "paths": {
+      "zod": ["./node_modules/zod"]
+    }
+  },
+  "include": ["src/**/*.ts", "../lib/token-schema.ts"]
+}

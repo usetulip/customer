@@ -1,0 +1,18 @@
+{
+  "mcpServers": {
+    "tulip": {
+      "type": "stdio",
+      "command": "node",
+      "args": ["${workspaceFolder}/mcp-server/dist/index.js"],
+      "env": {
+        "TULIP_TOKENS_DIR": "${workspaceFolder}/mcp-server/tokens"
+      }
+    },
+    "tulip-http-local": {
+      "url": "http://localhost:3333/mcp",
+      "headers": {
+        "x-tulip-api-key": "${env:TULIP_API_KEY}"
+      }
+    }
+  }
+}
