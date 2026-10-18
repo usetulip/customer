@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "tulip": {
+      "type": "stdio",
+      "command": "node",
+      "args": ["${workspaceFolder}/mcp-server/dist/index.js"],
+      "env": {
+        "TULIP_TOKENS_DIR": "${workspaceFolder}/mcp-server/tokens"
+      }
+    }
+  }
+}
