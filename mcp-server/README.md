@@ -17,14 +17,18 @@ npm run build
 
 Then open the repo in Cursor. `.cursor/mcp.json` registers two servers; enable one of them under **Cursor Settings → MCP**:
 
-- `tulip`: local stdio, running `node mcp-server/dist/index.js`. Rebuild after changing anything in `src/` or `../lib/token-schema.ts`.
-- `tulip-remote`: the deployed HTTP service. Export `TULIP_API_KEY` in the environment Cursor starts from, and point `url` at your Render service if it isn't `tulip-mcp.onrender.com`.
+- `tulip`: local stdio, running `node mcp-server/dist/index.js`. No key needed. Rebuild after changing anything in `src/` or `../lib/token-schema.ts`.
+- `tulip-http-local`: the HTTP server on `http://localhost:3333/mcp` (`npm run start:http:local`). It sends `x-tulip-api-key` from the `TULIP_API_KEY` environment variable.
+
+**[ONBOARDING.md](ONBOARDING.md)** walks through both, including how to make `TULIP_API_KEY` visible to Cursor. Run `npm run verify` to check the manifest the way Cursor uses it. Once the Render service is deployed, add an entry with its `url` and the same `headers`.
 
 | Script | What it does |
 | --- | --- |
 | `npm run build` | Bundles `src/` and `../lib/token-schema.ts` into `dist/index.js` (stdio) and `dist/http.js` (HTTP) with esbuild |
 | `npm run dev` / `npm run dev:http` | Runs the stdio / HTTP server from source with `tsx` |
 | `npm run start:http` | Runs the built HTTP server (needs the environment below) |
+| `npm run start:http:local` | Same, loading `mcp-server/.env` (copy it from `.env.example`) |
+| `npm run verify` | Connects to each server in `.cursor/mcp.json` the way Cursor does, then queries tokens and compiles a component |
 | `npm run typecheck` | `tsc --noEmit` |
 | `npm run smoke` | Builds, then runs `scripts/smoke.mjs` (stdio) and `scripts/smoke-http.mjs` (HTTP against a mock Supabase) |
 | `npm run create-api-key` | Mints an API key and stores its hash in Supabase |
