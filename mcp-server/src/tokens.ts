@@ -16,6 +16,10 @@ import { serviceRoleHeaders } from "./api-keys.ts";
 // Without Supabase credentials (local stdio development), tokens come from
 // JSON files named `<client_id>.json` in TULIP_TOKENS_DIR (default
 // ../tokens), and no blocks are published.
+//
+// For local development against Supabase (tulip-http-local), setting
+// TULIP_TOKENS_FALLBACK_DIR serves token files for clients that have nothing
+// published yet. Never set it on a deployed server.
 
 export const TOKENS_DIR = process.env.TULIP_TOKENS_DIR
   ? resolve(process.env.TULIP_TOKENS_DIR)
@@ -203,10 +207,53 @@ export function createSupabaseStore({
   };
 }
 
+const isNotFound = (err: unknown) =>
+  err instanceof TokenLoadError && err.message.startsWith("No token definition found");
+
+/**
+ * Published state first; token files only for clients Supabase has no tokens
+ * for. Invalid published tokens and Supabase outages are never masked by a
+ * file. Blocks always come from the primary store.
+ */
+export function withFileFallback(primary: TulipStore, fallback: TulipStore): TulipStore {
+  return {
+    description: `${primary.description}, falling back to ${fallback.description}`,
+
+    async listClientIds() {
+      const [published, files] = await Promise.all([primary.listClientIds(), fallback.listClientIds()]);
+      return [...new Set([...published, ...files])].sort();
+    },
+
+    async loadClientTokens(clientId) {
+      try {
+        return await primary.loadClientTokens(clientId);
+      } catch (err) {
+        if (isNotFound(err)) {
+          return fallback.loadClientTokens(clientId);
+        }
+        throw err;
+      }
+    },
+
+    listPublishedBlocks: (clientId) => primary.listPublishedBlocks(clientId),
+  };
+}
+
+/** Supabase, optionally backed by TULIP_TOKENS_FALLBACK_DIR for local development. */
+export function supabaseStoreFromEnv(
+  env: { TULIP_TOKENS_FALLBACK_DIR?: string },
+  supabase: { supabaseUrl: string; serviceRoleKey: string },
+): TulipStore {
+  const store = createSupabaseStore(supabase);
+  return env.TULIP_TOKENS_FALLBACK_DIR
+    ? withFileFallback(store, createFileStore(resolve(env.TULIP_TOKENS_FALLBACK_DIR)))
+    : store;
+}
+
 /** Supabase when both credentials are set, otherwise local token files. */
 export function storeFromEnv(env: NodeJS.ProcessEnv = process.env): TulipStore {
   if (env.SUPABASE_URL && env.SUPABASE_SERVICE_ROLE_KEY) {
-    return createSupabaseStore({
+    return supabaseStoreFromEnv(env, {
       supabaseUrl: env.SUPABASE_URL,
       serviceRoleKey: env.SUPABASE_SERVICE_ROLE_KEY,
     });

@@ -4,7 +4,9 @@
 // serving published tokens and blocks from client_token_sets / component_blocks.
 import { spawn } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
-import { readFile } from "node:fs/promises";
+import { mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { createServer, request } from "node:http";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
@@ -24,6 +26,7 @@ const keys = {
   expired: newKey(),
   outage: newKey(),
   broken: newKey(),
+  fallback: newKey(),
 };
 const rows = new Map([
   [sha(keys.demo), { id: "00000000-0000-0000-0000-000000000001", client_ids: ["demo"], revoked_at: null, expires_at: null }],
@@ -111,27 +114,47 @@ const port = await new Promise((resolve) => {
 });
 const base = `http://127.0.0.1:${port}`;
 
-const child = spawn(process.execPath, ["dist/http.js"], {
-  env: {
+function startServer(port, extraEnv = {}) {
+  const env = {
     ...process.env,
     SUPABASE_URL: mockUrl,
     SUPABASE_SERVICE_ROLE_KEY: "mock-service-role-key-000000",
     PORT: String(port),
     HOST: "127.0.0.1",
-  },
-  stdio: ["ignore", "ignore", "pipe"],
-});
-let stderr = "";
-child.stderr.on("data", (chunk) => (stderr += chunk));
+    ...extraEnv,
+  };
+  if (!extraEnv.TULIP_TOKENS_FALLBACK_DIR) delete env.TULIP_TOKENS_FALLBACK_DIR;
+  const proc = spawn(process.execPath, ["dist/http.js"], {
+    env,
+    stdio: ["ignore", "ignore", "pipe"],
+  });
+  proc.output = "";
+  proc.stderr.on("data", (chunk) => (proc.output += chunk));
+  return proc;
+}
 
-try {
+async function waitForHealth(url, proc) {
   for (let i = 0; ; i++) {
     try {
-      if ((await fetch(`${base}/healthz`)).ok) break;
+      if ((await fetch(`${url}/healthz`)).ok) return;
     } catch {}
-    if (i > 50) throw new Error(`server did not start:\n${stderr}`);
+    if (i > 50) throw new Error(`server did not start:\n${proc.output}`);
     await new Promise((r) => setTimeout(r, 100));
   }
+}
+
+const freePort = () =>
+  new Promise((resolve) => {
+    const probe = createServer().listen(0, "127.0.0.1", () => {
+      const { port } = probe.address();
+      probe.close(() => resolve(port));
+    });
+  });
+
+const child = startServer(port);
+
+try {
+  await waitForHealth(base, child);
   check("health check is public", (await fetch(`${base}/healthz`)).status === 200);
 
   const initialize = {
@@ -310,9 +333,59 @@ try {
     `${lookups.get(sha(keys.demo))} lookups`,
   );
   check("last_used_at is updated", patches >= 1);
-  check("no secrets in server logs", !stderr.includes(keys.demo) && !stderr.includes("mock-service-role"));
+  check("no secrets in server logs", !child.output.includes(keys.demo) && !child.output.includes("mock-service-role"));
 } finally {
   child.kill("SIGTERM");
+}
+
+// Local development fallback: token files fill in unpublished clients only.
+const fallbackDir = await mkdtemp(join(tmpdir(), "tulip-fallback-"));
+await writeFile(join(fallbackDir, "local.json"), JSON.stringify(demoTokens));
+const staleDemo = structuredClone(demoTokens);
+staleDemo.colors.primary["600"] = "#1d4ed8";
+await writeFile(join(fallbackDir, "demo.json"), JSON.stringify(staleDemo));
+await writeFile(join(fallbackDir, "broken.json"), JSON.stringify(demoTokens));
+rows.set(sha(keys.fallback), {
+  id: "00000000-0000-0000-0000-000000000005",
+  client_ids: ["demo", "local", "broken"],
+  revoked_at: null,
+  expires_at: null,
+});
+
+const fallbackPort = await freePort();
+const fallbackBase = `http://127.0.0.1:${fallbackPort}`;
+const fallbackChild = startServer(fallbackPort, { TULIP_TOKENS_FALLBACK_DIR: fallbackDir });
+try {
+  await waitForHealth(fallbackBase, fallbackChild);
+  const client = new Client({ name: "tulip-smoke-fallback", version: "0.0.0" });
+  await client.connect(
+    new StreamableHTTPClientTransport(new URL(`${fallbackBase}/mcp`), {
+      requestInit: { headers: { "x-tulip-api-key": keys.fallback } },
+    }),
+  );
+  const tokensOf = async (id) =>
+    JSON.parse((await client.readResource({ uri: `tulip://tokens/${id}` })).contents[0].text);
+
+  check("fallback: unpublished client is served from files", (await tokensOf("local")).version === 1);
+  check(
+    "fallback: published tokens win over files",
+    (await tokensOf("demo")).colors.primary["600"] === demoTokens.colors.primary["600"],
+  );
+  try {
+    await tokensOf("broken");
+    check("fallback: invalid published tokens are not masked by a file", false);
+  } catch (err) {
+    check("fallback: invalid published tokens are not masked by a file", /failed validation/.test(err.message));
+  }
+  const { resources } = await client.listResources();
+  check(
+    "fallback: listing merges published and file clients",
+    resources.some((r) => r.uri === "tulip://tokens/local") && resources.some((r) => r.uri === "tulip://tokens/demo"),
+  );
+  check("fallback: startup warns it is development only", /development only/.test(fallbackChild.output));
+  await client.close();
+} finally {
+  fallbackChild.kill("SIGTERM");
   mock.close();
 }
 

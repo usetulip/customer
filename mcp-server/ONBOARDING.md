@@ -99,7 +99,7 @@ Never paste the key into `.cursor/mcp.json`: that file is committed.
    npm run verify -- --server tulip-http-local
    ```
 
-   This should show the same three ✓ lines as Option A, once an operator has published tokens for the client in the Operator Taste Dashboard. The HTTP server reads tulip-db, not `mcp-server/tokens/`, so a client with nothing published fails with `No token definition found`. The key only sees its own clients, so `clients visible` lists exactly the `--client` values you minted it with.
+   This should show the same three ✓ lines as Option A. The HTTP server reads published tokens from tulip-db. `.env.example` sets `TULIP_TOKENS_FALLBACK_DIR=./tokens`, so `demo` and any other client with nothing published is served from `mcp-server/tokens/` instead. The key only sees its own clients, so `clients visible` lists exactly the `--client` values you minted it with.
 
 ## 4. Try it in Cursor chat
 
@@ -130,7 +130,7 @@ The local stdio server (`tulip`) reads `mcp-server/tokens/<client-id>.json` inst
 | `Invalid, expired or revoked API key` | Mint a new key (step 3.2), then re-export it and relaunch Cursor |
 | Works in `verify` but not in Cursor | Cursor can't see the variable: relaunch it from the terminal where it's exported (step 3.3) |
 | `This API key is not authorized for client "…"` | The key wasn't minted for that client; mint one with `--client <id>` |
-| `No token definition found for client "…"` over HTTP | Nothing is published for that client yet; publish a block for it in the Operator Taste Dashboard |
+| `No token definition found for client "…"` over HTTP | Nothing is published for that client and there's no `mcp-server/tokens/<id>.json`; check `TULIP_TOKENS_FALLBACK_DIR` in `.env`, or publish a block for it in the Operator Taste Dashboard |
 | `API key verification is temporarily unavailable` (503) | The server can't reach Supabase; check `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` in `.env` |
 | Port 3333 already in use | Change `PORT` in `.env` and the `url` in `.cursor/mcp.json` to the same value |
 

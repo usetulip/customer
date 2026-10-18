@@ -44,7 +44,7 @@ Operators publish from the Operator Taste Dashboard (usetulip/admin). A publish 
 
 `src/tokens.ts` picks the store:
 
-- **HTTP (`dist/http.js`):** always Supabase.
+- **HTTP (`dist/http.js`):** Supabase. For local development (`tulip-http-local`), `TULIP_TOKENS_FALLBACK_DIR` adds token files for clients that have nothing published, such as `demo`. Published tokens always win, and invalid published tokens or a Supabase outage are never masked by a file. Never set it on Render.
 - **stdio (`dist/index.js`):** Supabase when `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` are both set. Otherwise it reads local token files (`tokens/<client_id>.json`, or `$TULIP_TOKENS_DIR`) and publishes no blocks. That fallback is for development only.
 
 The startup log names the store in use.
@@ -120,6 +120,7 @@ The rules live in `src/governance.ts`. Templates build their markup from these c
 | `PORT` / `HOST` | no | Default `3000` / `0.0.0.0`; Render sets `PORT` |
 | `API_KEY_CACHE_TTL_MS` | no | How long a verified key is trusted before Supabase is checked again (default 60000, max 300000) |
 | `TULIP_TOKENS_DIR` | no | stdio file store only (when Supabase isn't configured). Defaults to `mcp-server/tokens` |
+| `TULIP_TOKENS_FALLBACK_DIR` | no | **Development only.** Token files for clients with nothing published (`.env.example` sets `./tokens`). Leave unset in production |
 
 The server exits at startup if a required variable is missing or invalid.
 
