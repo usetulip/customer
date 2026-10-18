@@ -2,9 +2,12 @@ import { serve } from "@hono/node-server";
 import { z } from "zod";
 import { createSupabaseApiKeyVerifier } from "./api-keys.ts";
 import { createHttpApp } from "./http.ts";
-import { TOKENS_DIR } from "./tokens.ts";
+import { supabaseStoreFromEnv } from "./tokens.ts";
 
 // Remote entry point (Render). Fails fast if required configuration is missing.
+// Tokens and approved blocks come from Supabase. TULIP_TOKENS_FALLBACK_DIR
+// (local development only, see .env.example) adds token files for clients
+// with nothing published.
 
 const EnvSchema = z.object({
   SUPABASE_URL: z.url(),
@@ -12,6 +15,7 @@ const EnvSchema = z.object({
   PORT: z.coerce.number().int().min(1).max(65535).default(3000),
   HOST: z.string().default("0.0.0.0"),
   API_KEY_CACHE_TTL_MS: z.coerce.number().int().min(0).max(300_000).default(60_000),
+  TULIP_TOKENS_FALLBACK_DIR: z.string().min(1).optional(),
 });
 
 const parsed = EnvSchema.safeParse(process.env);
@@ -21,7 +25,16 @@ if (!parsed.success) {
 }
 const env = parsed.data;
 
+const store = supabaseStoreFromEnv(env, {
+  supabaseUrl: env.SUPABASE_URL,
+  serviceRoleKey: env.SUPABASE_SERVICE_ROLE_KEY,
+});
+if (env.TULIP_TOKENS_FALLBACK_DIR) {
+  console.error("[tulip-mcp] TULIP_TOKENS_FALLBACK_DIR is set: local token files fill in unpublished clients (development only)");
+}
+
 const app = createHttpApp({
+  store,
   verifyApiKey: createSupabaseApiKeyVerifier({
     supabaseUrl: env.SUPABASE_URL,
     serviceRoleKey: env.SUPABASE_SERVICE_ROLE_KEY,
@@ -31,7 +44,7 @@ const app = createHttpApp({
 
 const server = serve({ fetch: app.fetch, port: env.PORT, hostname: env.HOST }, (info) => {
   console.error(
-    `[tulip-mcp] listening on http://${info.address}:${info.port}/mcp (tokens: ${TOKENS_DIR})`,
+    `[tulip-mcp] listening on http://${info.address}:${info.port}/mcp (tokens: ${store.description})`,
   );
 });
 

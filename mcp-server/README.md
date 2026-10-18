@@ -1,6 +1,6 @@
 # Tulip MCP server
 
-A [Model Context Protocol](https://modelcontextprotocol.io) server that exposes client theme tokens and compiles taste-governed shadcn/Tailwind components. It runs two ways:
+A [Model Context Protocol](https://modelcontextprotocol.io) server that exposes client theme tokens and operator-approved component blocks, and compiles taste-governed shadcn/Tailwind components. It runs two ways:
 
 - **Local stdio** (`dist/index.js`): spawned by your editor and trusted with every client.
 - **Remote Streamable HTTP** (`dist/http.js`): a Hono service for Render. Every request must carry an `x-tulip-api-key` header, which is verified against Supabase, and each key only sees its own clients.
@@ -33,9 +33,48 @@ Then open the repo in Cursor. `.cursor/mcp.json` registers two servers; enable o
 | `npm run smoke` | Builds, then runs `scripts/smoke.mjs` (stdio) and `scripts/smoke-http.mjs` (HTTP against a mock Supabase) |
 | `npm run create-api-key` | Mints an API key and stores its hash in Supabase |
 
+## Where tokens and blocks come from
+
+Operators publish from the Operator Taste Dashboard (usetulip/admin). A publish commits the block and the client's tokens to tulip-db in one transaction. This server reads that state with the service role, so a publish is visible on the next request (nothing is cached):
+
+| Resource | Supabase source |
+| --- | --- |
+| `tulip://tokens/{client_id}` | `public.client_token_sets.tokens` where `client_id` matches |
+| `tulip://blocks/{client_id}` | `public.component_blocks` where `client_id` matches and `published_at is not null` |
+
+`src/tokens.ts` picks the store:
+
+- **HTTP (`dist/http.js`):** Supabase. For local development (`tulip-http-local`), `TULIP_TOKENS_FALLBACK_DIR` adds token files for clients that have nothing published, such as `demo`. Published tokens always win, and invalid published tokens or a Supabase outage are never masked by a file. Never set it on Render.
+- **stdio (`dist/index.js`):** Supabase when `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` are both set. Otherwise it reads local token files (`tokens/<client_id>.json`, or `$TULIP_TOKENS_DIR`) and publishes no blocks. That fallback is for development only.
+
+The startup log names the store in use.
+
 ## Resource: `tulip://tokens/{client_id}`
 
-Read-only. Loads `tokens/<client_id>.json` (or `$TULIP_TOKENS_DIR/<client_id>.json`) and validates it against `ThemeTokensSchema` from `lib/token-schema.ts`. Invalid files are reported with the Zod issues and never served. `client_id` must be a lowercase slug, which keeps lookups inside the tokens directory. Listing and `client_id` completion come from the files present. `tokens/demo.json` is a sample.
+Read-only. Returns the client's published tokens, validated against `ThemeTokensSchema` from `lib/token-schema.ts`. Tokens that fail validation are reported with the Zod issues and never served. `client_id` must be a lowercase slug, which keeps file lookups inside the tokens directory and Supabase filters free of operators. Listing and `client_id` completion come from the clients that have tokens. `tokens/demo.json` is a sample for the file store.
+
+## Resource: `tulip://blocks/{client_id}`
+
+Read-only. Lists the component blocks an operator reviewed and published for the client:
+
+```json
+{
+  "client_id": "demo",
+  "blocks": [
+    {
+      "id": "…",
+      "name": "Billing overview",
+      "archetype": "saas-dashboard",
+      "version": 2,
+      "hash": "<sha256 of source + tokens>",
+      "published_at": "2026-10-18T00:00:00Z",
+      "source": "…"
+    }
+  ]
+}
+```
+
+`source` is the published snapshot (`published_source`). Edits an operator has made since then are under review and are never served. The file store always returns an empty list.
 
 ## Tool: `compile_component`
 
@@ -77,10 +116,11 @@ The rules live in `src/governance.ts`. Templates build their markup from these c
 | Variable | Required | Notes |
 | --- | --- | --- |
 | `SUPABASE_URL` | yes | `https://pdwtxnngciqdjbylyntk.supabase.co` (tulip-db) |
-| `SUPABASE_SERVICE_ROLE_KEY` | yes | Used only to look up key hashes. Keep it secret. |
+| `SUPABASE_SERVICE_ROLE_KEY` | yes | Looks up key hashes and reads published tokens and blocks. Keep it secret. |
 | `PORT` / `HOST` | no | Default `3000` / `0.0.0.0`; Render sets `PORT` |
 | `API_KEY_CACHE_TTL_MS` | no | How long a verified key is trusted before Supabase is checked again (default 60000, max 300000) |
-| `TULIP_TOKENS_DIR` | no | Defaults to `mcp-server/tokens` |
+| `TULIP_TOKENS_DIR` | no | stdio file store only (when Supabase isn't configured). Defaults to `mcp-server/tokens` |
+| `TULIP_TOKENS_FALLBACK_DIR` | no | **Development only.** Token files for clients with nothing published (`.env.example` sets `./tokens`). Leave unset in production |
 
 The server exits at startup if a required variable is missing or invalid.
 
