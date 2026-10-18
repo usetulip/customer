@@ -7,6 +7,12 @@
       "env": {
         "TULIP_TOKENS_DIR": "${workspaceFolder}/mcp-server/tokens"
       }
+    },
+    "tulip-remote": {
+      "url": "https://tulip-mcp.onrender.com/mcp",
+      "headers": {
+        "x-tulip-api-key": "${env:TULIP_API_KEY}"
+      }
     }
   }
 }
