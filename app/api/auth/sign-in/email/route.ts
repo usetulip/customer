@@ -1,36 +1,42 @@
 import { NextResponse } from 'next/server';
+import {
+  hasSupabaseConfig,
+  isSupabaseSession,
+  missingConfigResponse,
+  setSessionCookies,
+  supabaseAuth,
+  supabaseError,
+  toAuthUser,
+} from '@/lib/supabase-auth';
 
 export async function POST(request: Request) {
   try {
-    const { email, password } = await request.json();
-
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-    const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-
-    if (!supabaseUrl || !supabaseAnonKey) {
-      return NextResponse.json({ error: 'Missing Supabase environment variables' }, { status: 500 });
+    if (!hasSupabaseConfig()) {
+      return missingConfigResponse();
     }
 
-    const response = await fetch(`${supabaseUrl}/auth/v1/token?grant_type=password`, {
+    const { email, password } = await request.json();
+
+    const { ok, status, data } = await supabaseAuth('/token?grant_type=password', {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'apikey': supabaseAnonKey,
-      },
-      body: JSON.stringify({ email, password }),
+      body: { email, password },
     });
 
-    const data = await response.json();
-
-    if (!response.ok) {
+    if (!ok || !isSupabaseSession(data)) {
       return NextResponse.json(
-        { error: data.error_description || data.msg || data.error || 'Failed to sign in' },
-        { status: response.status }
+        { message: supabaseError(data, 'Failed to sign in') },
+        { status: ok ? 500 : status }
       );
     }
 
-    return NextResponse.json({ success: true, session: data });
+    const response = NextResponse.json({
+      redirect: false,
+      token: null,
+      user: toAuthUser(data.user),
+    });
+    setSessionCookies(response, data);
+    return response;
   } catch (err: any) {
-    return NextResponse.json({ error: err.message || 'Internal Server Error' }, { status: 500 });
+    return NextResponse.json({ message: err.message || 'Internal Server Error' }, { status: 500 });
   }
 }
